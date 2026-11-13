@@ -244,28 +244,15 @@
         </div>
     </div>
 
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, collection, addDoc, updateDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-        // Constants & Initialization
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-        
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        
-        const kasCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'kas_eyang_setono');
-
+    <script>
         // Utility
         function formatRupiah(angka) {
             return new Intl.NumberFormat('id-ID').format(angka);
         }
 
         // State
-        let kasData = [];
+        const STORAGE_KEY = 'kasKarangTaruna';
+        let kasData = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
         let idToDelete = null;
         let editingId = null;
         let isAdmin = false;
@@ -302,42 +289,9 @@
         // Set date to today default
         tanggalInput.valueAsDate = new Date();
 
-        // Authentication Setup
-        async function initAuth() {
-            try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
-                }
-                fetchData();
-            } catch (error) {
-                console.error("Authentication Error:", error);
-            }
-        }
-
-        // Fetch Data from Firestore
-        function fetchData() {
-            if (!auth.currentUser) return;
-            
-            onSnapshot(kasCollectionRef, (snapshot) => {
-                kasData = [];
-                snapshot.forEach((doc) => {
-                    kasData.push({ id: doc.id, ...doc.data() });
-                });
-                
-                // Sort by date (newest first), then by timestamp
-                kasData.sort((a, b) => {
-                    const dateA = new Date(a.tanggal).getTime();
-                    const dateB = new Date(b.tanggal).getTime();
-                    if (dateB !== dateA) return dateB - dateA;
-                    return (b.timestamp || 0) - (a.timestamp || 0);
-                });
-                
-                renderData();
-            }, (error) => {
-                console.error("Firestore Listen Error:", error);
-            });
+        function saveData() {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(kasData));
+            renderData();
         }
 
         // Login Logic
@@ -373,7 +327,7 @@
         loginCancelBtn.addEventListener('click', closeLoginModal);
         
         loginConfirmBtn.addEventListener('click', () => {
-            if (loginPin.value === '1234') { // PIN Statis untuk DEMO
+            if (loginPin.value === '1234') { // PIN Statis
                 isAdmin = true;
                 updateUIRole();
                 btnLogin.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg> Logout Admin`;
@@ -404,9 +358,9 @@
         }
 
         // Add / Update Transaction
-        form.addEventListener('submit', async function(e) {
+        form.addEventListener('submit', function(e) {
             e.preventDefault();
-            if (!auth.currentUser || !isAdmin) return;
+            if (!isAdmin) return;
 
             const tanggal = document.getElementById('tanggal').value;
             const keterangan = document.getElementById('keterangan').value.trim();
@@ -415,49 +369,59 @@
 
             if (!tanggal || !keterangan || isNaN(nominal) || nominal <= 0) return;
 
-            try {
-                if (editingId) {
-                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'kas_eyang_setono', editingId);
-                    await updateDoc(docRef, {
+            if (editingId) {
+                const index = kasData.findIndex(d => d.id === editingId);
+                if (index !== -1) {
+                    kasData[index] = {
+                        ...kasData[index],
                         tanggal,
                         keterangan,
                         jenis,
                         nominal
-                    });
-                    window.cancelEdit();
-                } else {
-                    await addDoc(kasCollectionRef, {
-                        tanggal,
-                        keterangan,
-                        jenis,
-                        nominal,
-                        timestamp: Date.now()
-                    });
-                    
-                    document.getElementById('keterangan').value = '';
-                    document.getElementById('nominal').value = '';
-                    document.getElementById('keterangan').focus();
+                    };
                 }
-            } catch (error) {
-                console.error("Error saving document: ", error);
+                window.cancelEdit();
+            } else {
+                const newData = {
+                    id: Date.now().toString(),
+                    tanggal,
+                    keterangan,
+                    jenis,
+                    nominal,
+                    timestamp: Date.now()
+                };
+                kasData.push(newData);
+                
+                document.getElementById('keterangan').value = '';
+                document.getElementById('nominal').value = '';
+                document.getElementById('keterangan').focus();
             }
+            saveData();
         });
 
         // Render Data Function
         function renderData() {
             tableBody.innerHTML = '';
             let saldo = 0;
+            
+            // Sort by date (newest first), then by timestamp
+            let sortedData = [...kasData].sort((a, b) => {
+                const dateA = new Date(a.tanggal).getTime();
+                const dateB = new Date(b.tanggal).getTime();
+                if (dateB !== dateA) return dateB - dateA;
+                return (b.timestamp || 0) - (a.timestamp || 0);
+            });
 
-            if (kasData.length === 0) {
+            if (sortedData.length === 0) {
                 emptyState.classList.remove('hidden');
                 emptyState.classList.add('flex');
                 totalBadge.textContent = '0 Data';
             } else {
                 emptyState.classList.add('hidden');
                 emptyState.classList.remove('flex');
-                totalBadge.textContent = `${kasData.length} Data`;
+                totalBadge.textContent = `${sortedData.length} Data`;
 
-                kasData.forEach(item => {
+                sortedData.forEach(item => {
                     if (item.jenis === 'masuk') saldo += item.nominal;
                     else saldo -= item.nominal;
 
@@ -577,15 +541,11 @@
 
         modalCancelBtn.addEventListener('click', window.closeModal);
         
-        modalConfirmBtn.addEventListener('click', async () => {
-            if (idToDelete && auth.currentUser && isAdmin) {
-                try {
-                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'kas_eyang_setono', idToDelete);
-                    await deleteDoc(docRef);
-                    window.closeModal();
-                } catch (error) {
-                    console.error("Error deleting doc: ", error);
-                }
+        modalConfirmBtn.addEventListener('click', () => {
+            if (idToDelete && isAdmin) {
+                kasData = kasData.filter(d => d.id !== idToDelete);
+                saveData();
+                window.closeModal();
             }
         });
 
@@ -598,7 +558,7 @@
         });
 
         // Start App
-        initAuth();
+        renderData();
 
     </script>
 </body>
